@@ -16,7 +16,7 @@ int targetCount, guessCount;
 bool eliminated[MaxTargetCount];
 
 void readWords() {
-  FILE* fword = fopen("../../../Desktop/Ideas/Puzzles/WordleWords.txt", "rt");
+  FILE* fword = fopen("WordleWords.txt", "rt");
   while (1) {
     fscanf(fword, "%5s,", word[targetCount]);
     if (word[targetCount][0] == '!') break;
@@ -413,7 +413,7 @@ double calcInfo(const char** guess) {
 #if 0
         for (int i = BitVectLen; --i >= 0;)
           excluded[i] |= (*bits)[i];    // inner loop -- 37 * 64 long bit vector
-#else // unrolled:
+#else // unrolled -> SSE instructions
         excluded[0] |= (*bits)[0];
         excluded[1] |= (*bits)[1];
         excluded[2] |= (*bits)[2];
