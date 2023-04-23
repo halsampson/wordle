@@ -389,13 +389,17 @@ void remain() {
 }
 
 
+// roate 4.558 25  4.558 25        lysin 3.684 16  5.372 41        chump 3.180 10  5.079 51
+//  TODO: chump should not decrease info!   **************
+//  included 2 then excluded 3 total info ??
+
 double infoBits(Select& excluded, int target) {
   int count = 0;
   for (int i = BitVectLen; --i >= 0;)
     count += __popcnt64(excluded[i]);
 
   if (excluded[target / IntBits] & ((Bits)1 << (target % IntBits))) // target excluded 
-    return log2(double(targetCount) / count);  // so target in excluded count
+    return log2(double(targetCount) / count);  // target in excluded count
   else return log2(double(targetCount) / (targetCount - count));   // target in remaining count: 25% left = 2 bits of info
 }
 
@@ -464,22 +468,25 @@ void checkWords() {
   const char* words[][MaxNumGuesses] = {
     {"salet",0},
     {"aitch","sedgy", 0},
-    {"softy","bicep",0},
-    {"angel","softy","bicep",0},
+    {"roate","lysin","chump",0},
+    {"anglo","vetch","wispy",0},
+    {"vetch","anglo","wispy",0},
   };
 
   for (int n = 0; n < sizeof words / sizeof words[0]; ++n) {
     Bits coveredLetters = 0;
+    const char* guesses[MaxNumGuesses] = { 0 };
     for (int w = 0; words[n][w]; ++w) {
-      const char* guesses[MaxNumGuesses] = { 0 };
-      guesses[0] = (const char*)words[n][w];
+      guesses[w] = (const char*)words[n][w];
       Bits thisLetters = 0;
       for (int pos = 5; --pos >= 0;)
         thisLetters |= LetterWeights[words[n][w][pos] - 'a'];
       coveredLetters |= thisLetters;
-      printf("%s %.2f %2d %2d  \t", words[n][w], calcInfo(guesses), (int)__popcnt64(thisLetters), (int)__popcnt64(coveredLetters));
+      printf("%s %.3f %2d  %.3f %2d\t", words[n][w], 
+         calcInfo(&guesses[w]), (int)__popcnt64(thisLetters), 
+         calcInfo(guesses), (int)__popcnt64(coveredLetters));
     }
-    printf("%.3f\n", calcInfo(words[n]));
+    printf("%.4f\n", calcInfo(words[n]));
   }
   printf("\n");
 }
@@ -508,7 +515,7 @@ void rankGuesses(int list = 5) { // single word rank
 }
 
 
-const int MaxNumPairs = 65536; //  MaxTargetCount* MaxTargetCount / 80;  // out of 4M  TODO *******
+const int MaxNumPairs = 16384; //  MaxTargetCount * MaxTargetCount / N;  // out of 4M    1567
 short topPair[MaxNumPairs][2];  // guess indices
 float pairInfo[MaxNumPairs];
 float minPairInfo = 6; // to 7.45 max
@@ -532,9 +539,6 @@ void addPair(int g0, int g1, float newPairInfo) {
 // artel 4.96
 // aitch sedgy 7.45
 
-// artel cushy index 8.14
-// bicep softy angel 8.193
-
 // probe triples using ranked pairs list
 //   keep only top N pairs -- min info threshold to store?
 
@@ -551,10 +555,10 @@ void bestInfoGuesses(int numGuesses = 2) {
   double bestInfo = InfoThresh[numGuesses];
   const char* guesses[MaxNumGuesses] = { 0 };
 
-  for (int g0 = 0; g0 < guessCount; ++g0) {
+  for (int g0 = 0; g0 < guessCount; ++g0) {  // or less - best are at top
     guess[0] = rank[g0];
     coveredLetters[0] = letters[guess[0]];
-    if (__popcnt64(coveredLetters[0]) < 14) continue;   // speedup vs. lower threshold for more exhaustive search
+    if (__popcnt64(coveredLetters[0]) < 10) continue;   // speedup vs. lower threshold for more exhaustive search
     if (numGuesses > 1) printf("%d \r", g0);
     guesses[0] = (const char*)word[guess[0]];
 
@@ -564,7 +568,7 @@ void bestInfoGuesses(int numGuesses = 2) {
         if (g1 >= g0) break;
         guess[1] = rank[g1++];
         coveredLetters[1] = coveredLetters[0] | letters[guess[1]];
-        if (__popcnt64(coveredLetters[1]) < 30) continue;
+        if (__popcnt64(coveredLetters[1]) < 26) continue;
         guesses[1] = (const char*)word[guess[1]];
       }
 
@@ -574,7 +578,7 @@ void bestInfoGuesses(int numGuesses = 2) {
           if (g2 >= g1) break;
           guess[2] = rank[g2++];
           coveredLetters[2] = coveredLetters[1] | letters[guess[2]];
-          if (__popcnt64(coveredLetters[2]) < 44) continue;
+          if (__popcnt64(coveredLetters[2]) < 40) continue;
           guesses[2] = (const char*)word[guess[2]];
         }
 
@@ -587,7 +591,7 @@ void bestInfoGuesses(int numGuesses = 2) {
               best[n] = guess[n];
             }
           }
-          printf("%.3f %2d\n", info, (int)__popcnt64(coveredLetters[numGuesses - 1]));  // 11.2 bits info req'd
+          printf("%.3f %2d %2d %d %d\n", info, (int)__popcnt64(coveredLetters[0]), (int)__popcnt64(coveredLetters[numGuesses - 1]), g0, g1);  // 11.2 bits info req'd
         }
         if (numGuesses == 2) {
           if (info >= minPairInfo)
@@ -617,11 +621,14 @@ void rankPairs(int list = 5) { // single word rank
   printf("%.3f\n\n", minPairInfo); // can use 1% less as initial threshold
 }
 
+
+// vetch anglo wispy 8.313 46 1567 4801
+
 void best3words() {
   const int numGuesses = 3;
   int guess[MaxNumGuesses]; // index
   const char* guesses[MaxNumGuesses] = { 0 };
-  double bestInfo = 0;
+  double bestInfo = 8;
   Bits coveredLetters[MaxNumGuesses];
 
   for (int p = 0; p < MaxNumPairs; ++p) {
@@ -634,11 +641,11 @@ void best3words() {
     coveredLetters[1] = letters[guess[0]] | letters[guess[1]];
     printf("%d\r", p);
 
-    for (int g2 = 0; g2 < guessCount; ++g2) { // ? scan top-ranked first -> bset re-rank given pairs
+    for (int g2 = 0; g2 < guessCount; ++g2) { // middle ranks most likely
       guess[2] = rank[g2];
       guesses[2] = (const char*)word[guess[2]];
       coveredLetters[2] = coveredLetters[1] | letters[guess[2]];
-      if (__popcnt64(coveredLetters[2]) < 44) continue;
+      if (__popcnt64(coveredLetters[2]) < 40) continue;
 
       double info = calcInfo(guesses);
       if (info >= bestInfo - 0.05) {
@@ -647,7 +654,7 @@ void best3words() {
         for (int n = 0; n < numGuesses; ++n)
           printf("%s ", word[guess[n]]);
         
-        printf("%.3f %2d\n", info, (int)__popcnt64(coveredLetters[numGuesses - 1]));  // 11.2 bits info req'd
+        printf("%.3f %2d %d %d\n", info, (int)__popcnt64(coveredLetters[numGuesses - 1]), p, g2);  // 11.2 bits info req'd
       }
     }
   }
