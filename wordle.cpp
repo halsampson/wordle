@@ -6,14 +6,14 @@
 #include <math.h>
 #include <intrin.h>
 
-const int MaxTargetCount = 2309 - 5;
-const int MaxGuessCount = MaxTargetCount + 10700;
+const int MaxNumGuesses = 6;
 
-typedef char Word[8];
+const int MaxTargetCount = 2309 - 5;  // removed 5 recent solutions to make count % 64 == 0
+const int MaxGuessCount = MaxTargetCount + 10688 + 64;
+
+typedef char Word[8];      // could be 5 or 6 -- faster aligned
 Word word[MaxGuessCount];  // target + extra guess words
 int targetCount, guessCount;
-
-bool eliminated[MaxTargetCount];
 
 void readWords() {
   FILE* fword = fopen("WordleWords.txt", "rt");
@@ -55,6 +55,14 @@ bool match(const char* target, const char* guess, const char* color) {
   return true;
 }
 
+void matches() {
+  for (int target = targetCount; --target >= 0;)
+    if (match(word[target], "aurei", "   gy")
+     && match(word[target], "islet", "y  gy")
+    ) printf("%s\n", word[target]);
+}
+
+
 // find best guess words
  // by num words eliminated by guess (min total words remaining)
 
@@ -67,7 +75,6 @@ const char* guessed[8] = { 0 };
 #endif
 
 char resp[8][8];
-
 
 // TODO: see/use bestGuess
 
@@ -133,7 +140,7 @@ void bestEliminator(int n) { // 0.. 5
   guessed[n] = word[best];
 }
 
-
+bool eliminated[MaxTargetCount];
 
 char* bestGuess() {  // given responses
   int maxEliminates = 0;
@@ -174,135 +181,30 @@ char* bestGuess() {  // given responses
   return word[best];
 }
 
+void bestGuesses() {
+  char goal[8] = "swell";
 
-/*
-Each guess divides words into two classes: match / non-match to response
-Why can we guess 2316 words in 4 or 5 tries?
-   More information than 1 bit per guess
-   Each position in response divides words into two (uneven) classes as well
+  printf("%s\n", guessed[0]);
 
-Compressed sensing?
-
-26 * 5 * 3 = 390 subclasses: g y ' ' for each letter
-# 2315 < 64 * 64 long bit arrays to do rapid intersections
-# member count
-# cross-member counts 390x390
-*/
-
-
-void matches() {
-  for (int target = targetCount; --target >= 0;)
-    if (match(word[target], "aurei", "   gy")
-     && match(word[target], "islet", "y  gy")   
-    ) printf("%s\n", word[target]);
-}
-
-typedef unsigned __int64 Bits;
-
-const int IntBits = sizeof(Bits) * 8;
-const int BitVectLen = (MaxTargetCount + IntBits - 1) / IntBits;
-
-typedef Bits Select[BitVectLen];
-typedef Select Subset[26][5]; // [letter][pos]
-
-Subset green, grnx, yelx, gryx;
-
-Bits letters[MaxGuessCount];
-Bits LetterWeights[26];
-
-void initSubsets() { // bit set indicates excluded word
-  // Bits lastVectMask = ((Bits)1 << (targetCount % IntBits)) - 1;  // not needed if targetCount % sizeof(Bits) == 0
-
-  int letterCount[26] = { 0 };
-  for (int t = targetCount; --t >= 0;) {
-    for (int pos = 5; --pos >= 0;) {
-      green[word[t][pos] - 'a'][pos][t / IntBits] |= (Bits)1 << (t % IntBits);
-      ++letterCount[word[t][pos] - 'a'];
+  for (int n = 0; n < 6; ++n) {
+    if (guessed[n]) {
+      strcpy(resp[n], response(goal, guessed[n]));
+      for (int target = 0; target < targetCount; ++target)
+        if (!match(word[target], guessed[n], resp[n]))
+          eliminated[target] = true;
     }
+
+    if (!guessed[n + 1])
+      guessed[n + 1] = bestGuess();
+    printf("\n");
   }
-
-  for (int letter = 26; --letter >= 0;) 
-    for (int pos = 5; --pos >= 0;) {
-      for (int i = BitVectLen; --i >= 0;)
-        grnx[letter][pos][i] = ~green[letter][pos][i];
-      // grnx[letter][pos][BitVectLen - 1] &= lastVectMask;
-    }
-
-  for (int letter = 26; --letter >= 0;)
-    for (int pos = 5; --pos >= 0;) {
-      for (int i = BitVectLen; --i >= 0;) {
-        for (int opos = 5; --opos >= 0;)
-          gryx[letter][opos][i] |= green[letter][pos][i];
-
-        yelx[letter][pos][i] |= green[letter][pos][i]; // excluded at this position
-
-        // yellow depends on union of other pos
-        Select yellowLetter = { 0 };
-        for (int q = 4; --q >= 0;) {
-          int opos = (pos + q) % 5;
-          yellowLetter[i] |= green[letter][opos][i];
-        }
-
-        yelx[letter][pos][i] |= ~yellowLetter[i];
-        //if (i == BitVectLen - 1)
-        //  yelx[letter][pos][BitVectLen - 1] &= lastVectMask;        
-      }
-    }
-
-  // allocate letters bits by letterCount weight 
-  int wSum = 26;
-  for (int l = 26; --l >= 0;) {
-    LetterWeights[l] = (Bits)1 << l;
-    int weight = (64 * letterCount[l] + (targetCount * 5 / 2 - 2450)) / (targetCount * 5) - 1;  // adjust rounding so that wSum == 64
-    if (weight > 0) {
-      LetterWeights[l] |= (((Bits)1 << weight) - 1) << wSum;
-      wSum += weight;
-    }
-  }
-  if (wSum > 64) exit(64);  // tune for 64
-    
-  for (int g = guessCount; --g >= 0;)
-    for (int pos = 5; --pos >= 0;)
-      letters[g] |= LetterWeights[word[g][pos] - 'a'];
-}
-
-
-void wordsLeft(Select& excluded) {
-  for (int t = targetCount; --t >= 0;)
-    if (!(excluded[t / IntBits] & ((Bits)1 << (t % IntBits))))
-      printf("%s ", word[t]);
-}
-
-
-void remain() {
-  char guess[6][8] = { "angel", "softy", "bicep" };
-  char color[6][8] = { "y    ", "    y", "     " };
-
-  Select excluded = { 0 };
-  for (int g = 0; guess[g][0]; ++g)
-  for (int pos = 5; --pos >= 0;) {
-    Subset* exclude;
-    switch (color[g][pos]) {
-      case ' ':
-      default:  exclude = &gryx; break;
-      case 'y': exclude = &yelx; break;
-      case 'g': exclude = &grnx; break;
-    }
-    for (int i = BitVectLen; --i >= 0;)
-      excluded[i] |= (*exclude)[guess[g][pos] - 'a'][pos][i];
-  }
-
-  wordsLeft(excluded);
-  printf("\n");
-
-  // suggest best guess  TODO
 }
 
 // hit <= 4: soare clint pudgy
 // hit == 5, 6: roate sulci nymph
 // hit >= 7: roate lysin chump   ****
 
-void bestByWeights() {
+void bestByWeights() { // more human useful responses
   const int match = 1, hit = 20;  // weights
 
   int bestGuess[4];
@@ -337,7 +239,6 @@ void bestByWeights() {
 
     printf("%d: %5s\n", best, word[bestGuess[guessNum]]);
   }
-
 
   // frequency of remaining letters
   int count[5][26] = { 0 };
@@ -382,9 +283,111 @@ void bestByWeights() {
     }
     bestLetters[bestPos] = bestLetter;
   }
-
   printf("%5s\n", bestLetters);
 }
+
+
+typedef unsigned __int64 Bits;
+
+const int IntBits = sizeof(Bits) * 8;
+const int BitVectLen = (MaxTargetCount + IntBits - 1) / IntBits;
+
+typedef Bits Select[BitVectLen];
+typedef Select Subset[26][5]; // [letter][pos]
+Subset green, grnx, yelx, gryx;
+
+int letterCount[26];
+
+void initSubsets() { // bit set indicates excluded word
+  // Bits lastVectMask = ((Bits)1 << (targetCount % IntBits)) - 1;  // not needed if targetCount % sizeof(Bits) == 0
+
+  for (int t = targetCount; --t >= 0;) {
+    for (int pos = 5; --pos >= 0;) {
+      int letter = word[t][pos] - 'a';
+      green[letter][pos][t / IntBits] |= (Bits)1 << (t % IntBits);
+      ++letterCount[letter];
+    }
+  }
+
+  for (int letter = 26; --letter >= 0;)
+    for (int pos = 5; --pos >= 0;) {
+      for (int i = BitVectLen; --i >= 0;)
+        grnx[letter][pos][i] = ~green[letter][pos][i];
+      // grnx[letter][pos][BitVectLen - 1] &= lastVectMask;
+    }
+
+  for (int letter = 26; --letter >= 0;)
+    for (int pos = 5; --pos >= 0;) {
+      for (int i = BitVectLen; --i >= 0;) {
+        for (int opos = 5; --opos >= 0;)
+          gryx[letter][opos][i] |= green[letter][pos][i];
+
+        yelx[letter][pos][i] |= green[letter][pos][i]; // excluded at this position
+
+        // yellow depends on union of other pos
+        Select yellowLetter = { 0 };
+        for (int q = 4; --q >= 0;) {
+          int opos = (pos + q) % 5;
+          yellowLetter[i] |= green[letter][opos][i];
+        }
+
+        yelx[letter][pos][i] |= ~yellowLetter[i];
+        //if (i == BitVectLen - 1)
+        //  yelx[letter][pos][BitVectLen - 1] &= lastVectMask;        
+      }
+    }
+}
+
+Bits letters[MaxGuessCount];
+Bits LetterWeights[26];
+
+void initLetterWeights() { // allocate 64 letters bits by letterCount weight 
+  int wSum = 26;
+  for (int l = 26; --l >= 0;) {
+    LetterWeights[l] = (Bits)1 << l;
+    int weight = (64 * letterCount[l] + (targetCount * 5 / 2 - 2450)) / (targetCount * 5) - 1;  // adjust rounding so that wSum == 64
+    if (weight > 0) {
+      LetterWeights[l] |= (((Bits)1 << weight) - 1) << wSum;
+      wSum += weight;
+    }
+  }
+  if (wSum > 64) exit(64);  // tune for 64
+    
+  for (int g = guessCount; --g >= 0;)
+    for (int pos = 5; --pos >= 0;)
+      letters[g] |= LetterWeights[word[g][pos] - 'a'];
+}
+
+void wordsLeft(Select& excluded) {
+  for (int t = targetCount; --t >= 0;)
+    if (!(excluded[t / IntBits] & ((Bits)1 << (t % IntBits))))
+      printf("%s ", word[t]);
+}
+
+void remain() {
+  char guess[6][8] = { "angel", "softy", "bicep" };
+  char color[6][8] = { "y    ", "    y", "     " };
+
+  Select excluded = { 0 };
+  for (int g = 0; guess[g][0]; ++g)
+    for (int pos = 5; --pos >= 0;) {
+      Subset* exclude;
+      switch (color[g][pos]) {
+      case ' ':
+      default:  exclude = &gryx; break;
+      case 'y': exclude = &yelx; break;
+      case 'g': exclude = &grnx; break;
+      }
+      for (int i = BitVectLen; --i >= 0;)
+        excluded[i] |= (*exclude)[guess[g][pos] - 'a'][pos][i];
+    }
+
+  wordsLeft(excluded);
+  printf("\n");
+
+  // suggest best guess  TODO
+}
+
 
 double infoBits(Select& excluded, int target) {
   int count = 0;
@@ -400,7 +403,7 @@ double calcInfo(const char** guess) {
   double info = 0;
   for (int t = targetCount; --t >= 0;) {
     Select excluded = { 0 };
-    for (int pos = 5; --pos >= 0;)      
+    for (int pos = 5; --pos >= 0;)
       for (int n = 0; guess[n]; ++n) {
         int letter = guess[n][pos] - 'a';
         Select* bits;
@@ -457,6 +460,30 @@ double calcInfo(const char** guess) {
   return info / targetCount;  // average info revealed
 }
 
+void checkWords() {
+  const char* words[][MaxNumGuesses] = {
+    {"salet",0},
+    {"aitch","sedgy", 0},
+    {"softy","bicep",0},
+    {"angel","softy","bicep",0},
+  };
+
+  for (int n = 0; n < sizeof words / sizeof words[0]; ++n) {
+    Bits coveredLetters = 0;
+    for (int w = 0; words[n][w]; ++w) {
+      const char* guesses[MaxNumGuesses] = { 0 };
+      guesses[0] = (const char*)words[n][w];
+      Bits thisLetters = 0;
+      for (int pos = 5; --pos >= 0;)
+        thisLetters |= LetterWeights[words[n][w][pos] - 'a'];
+      coveredLetters |= thisLetters;
+      printf("%s %.2f %2d %2d  \t", words[n][w], calcInfo(guesses), (int)__popcnt64(thisLetters), (int)__popcnt64(coveredLetters));
+    }
+    printf("%.3f\n", calcInfo(words[n]));
+  }
+  printf("\n");
+}
+
 double info[MaxGuessCount];
 int rank[MaxGuessCount];
 
@@ -464,7 +491,6 @@ int rankByInfo(const void* arg1, const void* arg2) {
   return info[*(int*)arg2] > info[*(int*)arg1] ? 1 : -1;
 }
 
-const int MaxNumGuesses = 6;
 
 void rankGuesses(int list = 5) { // single word rank
   const char* guesses[MaxNumGuesses] = { 0 };
@@ -477,20 +503,20 @@ void rankGuesses(int list = 5) { // single word rank
   qsort(&rank, guessCount, sizeof rank[0], rankByInfo);
 
   for (int i = 0; i < list; ++i)
-    printf("%s %.2f %d\n", word[rank[i]], info[rank[i]], (int)__popcnt64(letters[rank[i]]));
+    printf("%s %.3f %2d\n", word[rank[i]], info[rank[i]], (int)__popcnt64(letters[rank[i]]));
   printf("\n");
 }
 
 
-const int NumTopPairs = 65536; //  MaxTargetCount* MaxTargetCount / 80;  // out of 4M  TODO *******
-short topPair[NumTopPairs][2];  // guess indices
-float pairInfo[NumTopPairs];
-float minPairInfo = 6.4f;  // 6.6 OK
+const int MaxNumPairs = 65536; //  MaxTargetCount* MaxTargetCount / 80;  // out of 4M  TODO *******
+short topPair[MaxNumPairs][2];  // guess indices
+float pairInfo[MaxNumPairs];
+float minPairInfo = 6; // to 7.45 max
 
 void addPair(int g0, int g1, float newPairInfo) {
   while (1) {
-    for (int pair = 0; pair < NumTopPairs; ++pair) {
-      if (pairInfo[pair] <= minPairInfo && newPairInfo > pairInfo[pair]) {
+    for (int pair = 0; pair < MaxNumPairs; ++pair) {
+      if (pairInfo[pair] <= minPairInfo) {
         pairInfo[pair] = newPairInfo;
         topPair[pair][0] = g0;
         topPair[pair][1] = g1;
@@ -498,59 +524,9 @@ void addPair(int g0, int g1, float newPairInfo) {
       }
     }
     minPairInfo += minPairInfo / 100;
-    printf("%.3f\r", minPairInfo);
+    printf("\t%.3f\r", minPairInfo);
   }
 }
-
-int rankPairsByInfo(const void* arg1, const void* arg2) {
-  return pairInfo[*(int*)arg2] > pairInfo[*(int*)arg1] ? 1 : -1;
-}
-
-int pairRank[NumTopPairs];
-
-void rankPairs(int list = 5) { // single word rank
-  for (int i = NumTopPairs; --i >= 0;) pairRank[i] = i;
-  qsort(&pairRank, NumTopPairs, sizeof pairRank[0], rankPairsByInfo);
-
-  for (int i = 0; i < list; ++i)
-    printf("%s %s %.2f %d\n", word[topPair[pairRank[i]][0]], word[topPair[pairRank[i]][1]], pairInfo[pairRank[i]], 
-       (int)__popcnt64(letters[topPair[pairRank[i]][0]] | letters[topPair[pairRank[i]][1]]));
-  printf("%.3f \n", minPairInfo); // use 1% less as initial threshold next time ***** TODO
-}
-
-void best3words() {
-  const int numGuesses = 3;
-  int guess[MaxNumGuesses]; // index
-  const char* guesses[MaxNumGuesses] = { 0 };
-  double bestInfo = 0;
-  Bits coveredLetters[MaxNumGuesses];
-
-  for (int p = 0; p < NumTopPairs; ++p) {
-    int pair = pairRank[p];
-    guess[0] = topPair[pair][0];
-    guess[1] = topPair[pair][1];
-    guesses[0] = (const char*)word[guess[0]];
-    guesses[1] = (const char*)word[guess[1]];
-    coveredLetters[1] = letters[guess[0]] | letters[guess[1]];
-
-    for (int g2 = 0; g2 < guessCount; ++g2) {
-      guess[2] = rank[g2];
-      guesses[2] = (const char*)word[guess[2]];
-
-      double info = calcInfo(guesses);
-      if (info >= bestInfo - 0.05) {
-        if (info >= bestInfo)
-          bestInfo = info;
-        for (int n = 0; n < numGuesses; ++n) 
-          printf("%s ", word[guess[n]]);
-        coveredLetters[2] |= letters[guess[2]];
-        printf("%.3f %d\n", info, (int)__popcnt64(coveredLetters[numGuesses - 1]));  // 11.2 bits info req'd
-      }
-    }
-  }
-}
-
-
 
 // salet 4.69
 // artel 4.96
@@ -571,23 +547,24 @@ void bestInfoGuesses(int numGuesses = 2) {
   int best[MaxNumGuesses];
   Bits coveredLetters[MaxNumGuesses];
 
-  double bestInfo = numGuesses == 3 ? 8 : 4; 
+  const double InfoThresh[MaxNumGuesses] = { 0, 4, 7.3, 8, };  // start progress display
+  double bestInfo = InfoThresh[numGuesses];
   const char* guesses[MaxNumGuesses] = { 0 };
 
   for (int g0 = 0; g0 < guessCount; ++g0) {
     guess[0] = rank[g0];
     coveredLetters[0] = letters[guess[0]];
-    if (__popcnt64(coveredLetters[0]) < 14) continue;    // speedup vs. lower threshold for more exhaustive search
-    if (numGuesses > 1) printf("%d\r", g0);
+    if (__popcnt64(coveredLetters[0]) < 14) continue;   // speedup vs. lower threshold for more exhaustive search
+    if (numGuesses > 1) printf("%d \r", g0);
     guesses[0] = (const char*)word[guess[0]];
 
-    int g1 = 0; 
+    int g1 = 0;
     while (1) {
       if (numGuesses >= 2) {
         if (g1 >= g0) break;
         guess[1] = rank[g1++];
         coveredLetters[1] = coveredLetters[0] | letters[guess[1]];
-        if (__popcnt64(coveredLetters[1]) < 35) continue;
+        if (__popcnt64(coveredLetters[1]) < 30) continue;
         guesses[1] = (const char*)word[guess[1]];
       }
 
@@ -597,7 +574,7 @@ void bestInfoGuesses(int numGuesses = 2) {
           if (g2 >= g1) break;
           guess[2] = rank[g2++];
           coveredLetters[2] = coveredLetters[1] | letters[guess[2]];
-          if (__popcnt64(coveredLetters[2]) < 40) continue;
+          if (__popcnt64(coveredLetters[2]) < 44) continue;
           guesses[2] = (const char*)word[guess[2]];
         }
 
@@ -608,111 +585,112 @@ void bestInfoGuesses(int numGuesses = 2) {
             if (info >= bestInfo) {
               bestInfo = info;
               best[n] = guess[n];
-            }           
+            }
           }
-          printf("%.3f %d\n", info, (int)__popcnt64(coveredLetters[numGuesses - 1]));  // 11.2 bits info req'd
+          printf("%.3f %2d\n", info, (int)__popcnt64(coveredLetters[numGuesses - 1]));  // 11.2 bits info req'd
         }
-        if (numGuesses < 3) {
-          if (info >= minPairInfo) 
-            addPair(g0, g1, (float)info);
+        if (numGuesses == 2) {
+          if (info >= minPairInfo)
+            addPair(guess[0], guess[1], (float)info);
           break;
         }
       }
       if (numGuesses < 2) break;
     }
   }
-}
-
-
-void checkWords() {
-  const char* words[][MaxNumGuesses] = {
-    {"salet",0},
-    {"aitch","sedgy", 0},
-    {"softy","bicep",0},
-    {"angel","softy","bicep",0},
-  };
-
-  for (int n = 0; n < sizeof words / sizeof words[0]; ++n) {    
-    Bits allLetters = 0;
-    for (int w = 0; words[n][w]; ++w) {
-      const char* guesses[MaxNumGuesses] = { 0 };
-      guesses[0] = (const char*)words[n][w];
-      Bits letters = 0;
-      for (int pos = 5; --pos >= 0;)
-        letters |= LetterWeights[words[n][w][pos] - 'a'];
-      allLetters |= letters;
-      printf("%s %.2f %d  %d  ", words[n][w], calcInfo(guesses), (int)__popcnt64(letters), (int)__popcnt64(allLetters));
-    }
-    printf("%.3f ", calcInfo(words[n]));
-    printf("%d\n", (int)__popcnt64(allLetters));
-  }
   printf("\n");
 }
 
-void bestGuesses() {
-  char goal[8] = "swell";
+int rankPairsByInfo(const void* arg1, const void* arg2) {
+  return pairInfo[*(int*)arg2] > pairInfo[*(int*)arg1] ? 1 : -1;
+}
 
-  printf("%s\n", guessed[0]);
+int pairRank[MaxNumPairs];
 
-  for (int n = 0; n < 6; ++n) {
-    if (guessed[n]) {
-      strcpy(resp[n], response(goal, guessed[n]));
-      for (int target = 0; target < targetCount; ++target)
-        if (!match(word[target], guessed[n], resp[n]))
-          eliminated[target] = true;
+void rankPairs(int list = 5) { // single word rank
+  for (int i = MaxNumPairs; --i >= 0;) pairRank[i] = i;
+  qsort(&pairRank, MaxNumPairs, sizeof pairRank[0], rankPairsByInfo);
+
+  for (int i = 0; i < list; ++i)
+    printf("%s %s %.3f %2d\n", word[topPair[pairRank[i]][0]], word[topPair[pairRank[i]][1]], pairInfo[pairRank[i]],
+      (int)__popcnt64(letters[topPair[pairRank[i]][0]] | letters[topPair[pairRank[i]][1]]));
+  printf("%.3f\n\n", minPairInfo); // can use 1% less as initial threshold
+}
+
+void best3words() {
+  const int numGuesses = 3;
+  int guess[MaxNumGuesses]; // index
+  const char* guesses[MaxNumGuesses] = { 0 };
+  double bestInfo = 0;
+  Bits coveredLetters[MaxNumGuesses];
+
+  for (int p = 0; p < MaxNumPairs; ++p) {
+    int pair = pairRank[p];
+    guess[0] = topPair[pair][0];
+    guess[1] = topPair[pair][1];
+    if (guess[0] == 0 && guess[1] == 0) break;
+    guesses[0] = (const char*)word[guess[0]];
+    guesses[1] = (const char*)word[guess[1]];
+    coveredLetters[1] = letters[guess[0]] | letters[guess[1]];
+    printf("%d\r", p);
+
+    for (int g2 = 0; g2 < guessCount; ++g2) { // ? scan top-ranked first -> bset re-rank given pairs
+      guess[2] = rank[g2];
+      guesses[2] = (const char*)word[guess[2]];
+      coveredLetters[2] = coveredLetters[1] | letters[guess[2]];
+      if (__popcnt64(coveredLetters[2]) < 44) continue;
+
+      double info = calcInfo(guesses);
+      if (info >= bestInfo - 0.05) {
+        if (info >= bestInfo)
+          bestInfo = info;
+        for (int n = 0; n < numGuesses; ++n)
+          printf("%s ", word[guess[n]]);
+        
+        printf("%.3f %2d\n", info, (int)__popcnt64(coveredLetters[numGuesses - 1]));  // 11.2 bits info req'd
+      }
     }
-
-    if (!guessed[n + 1])
-      guessed[n + 1] = bestGuess();
-    printf("\n");
   }
 }
 
-int main() {
-  readWords(); 
-  printf("%d\n", targetCount);
 
+int main() {
+  readWords(); // printf("%d\n", targetCount);
   initSubsets();
+  initLetterWeights();
 
   // remain(); exit(0);
-  
   checkWords();
 
-  rankGuesses(); 
-  
-  bestInfoGuesses(2);
-  rankPairs();
-  
+  rankGuesses();
+
+  FILE* pf = fopen("pairs", "rb");
+  if (!pf) {
+    bestInfoGuesses(2);
+    pf = fopen("pairs", "wb");
+    fwrite(topPair, sizeof topPair, 1, pf);
+    fwrite(pairInfo, sizeof pairInfo, 1, pf);
+  } else {
+    fread(topPair, sizeof topPair, 1, pf);
+    fread(pairInfo, sizeof pairInfo, 1, pf);
+  }
+  fclose(pf);
+
+  rankPairs();  
+
   best3words(); 
   exit(0);
 
   // bestByWeights(); exit(0);
 
-  matches(); exit(0);
+  // matches(); exit(0);
 
-#if 0
-  for (int n = 0; n < 4; ++n) {
-    bestWord(n);
-    printf("\n");
-  }
-  
-  exit(0);
-#endif
-
-  bestEliminator(1); exit(0);
+  // bestEliminator(1); exit(0);
 
   exit(0);
 }
 
 /*
-const int match = 1, hit = 1;  // weights
-
-6062: soare
-4271: clint
-2806: pudgy
-      wfxkz
-      vhjmq
-
 Feb 2022:     2,315 hidden words, 10,657 allowed guesses
 NYT Mar 2022: 2,309 hidden words, 10,663 allowed guesses
 removed: agora, fibre, lynch, pupal, slave, wench 
