@@ -326,11 +326,10 @@ void initSubsets() { // bit set indicates excluded word
 
         // yellow depends on union of other pos
         Select yellowLetter = { 0 };
-        for (int q = 4; --q >= 0;) {
+        for (int q = 5; --q;) { // 4..1 offset
           int opos = (pos + q) % 5;
           yellowLetter[i] |= green[letter][opos][i];
         }
-
         yelx[letter][pos][i] |= ~yellowLetter[i];
         //if (i == BitVectLen - 1)
         //  yelx[letter][pos][BitVectLen - 1] &= lastVectMask;        
@@ -398,10 +397,15 @@ double infoBits(Select& excluded, int target) {
   for (int i = BitVectLen; --i >= 0;)
     count += __popcnt64(excluded[i]);
 
-  if (excluded[target / IntBits] & ((Bits)1 << (target % IntBits))) // target excluded 
-    return log2(double(targetCount) / count);  // target in excluded count
-  else return log2(double(targetCount) / (targetCount - count));   // target in remaining count: 25% left = 2 bits of info
+  if (count == targetCount) {
+    // printf("0");
+    return 0;  // shouldn't exclude target!  TODO
+  }
+
+  return log2(double(targetCount) / (targetCount - count));   // target in remaining count: 25% left = 2 bits of info
 }
+
+// salet : artsy  excludes all but one -> excluded is wrong!!
 
 double calcInfo(const char** guess) {
   double info = 0;
