@@ -6,6 +6,8 @@
 #include <math.h>
 #include <intrin.h>
 
+//TODO: use RMS of words left
+
 const int MaxNumGuesses = 6;
 
 const int MaxTargetCount = 2309 - 5;  // removed 5 recent solutions to make count % 64 == 0
@@ -387,25 +389,13 @@ void remain() {
   // suggest best guess  TODO
 }
 
-
-// roate 4.558 25  4.558 25        lysin 3.684 16  5.372 41        chump 3.180 10  5.079 51
-//  TODO: chump should not decrease info!   **************
-//  included 2 then excluded 3 total info ??
-
 double infoBits(Select& excluded, int target) {
   int count = 0;
   for (int i = BitVectLen; --i >= 0;)
     count += __popcnt64(excluded[i]);
 
-  if (count == targetCount) {
-    // printf("0");
-    return 0;  // shouldn't exclude target!  TODO
-  }
-
   return log2(double(targetCount) / (targetCount - count));   // target in remaining count: 25% left = 2 bits of info
 }
-
-// salet : artsy  excludes all but one -> excluded is wrong!!
 
 double calcInfo(const char** guess) {
   double info = 0;
@@ -471,10 +461,9 @@ double calcInfo(const char** guess) {
 void checkWords() {
   const char* words[][MaxNumGuesses] = {
     {"salet",0},
-    {"aitch","sedgy", 0},
-    {"roate","lysin","chump",0},
-    {"anglo","vetch","wispy",0},
-    {"vetch","anglo","wispy",0},
+    {"soare","clint","pudgy",0},
+    {"dance","blist","morph",0},
+    {"robed","slant","chimp",0},
   };
 
   for (int n = 0; n < sizeof words / sizeof words[0]; ++n) {
@@ -519,7 +508,7 @@ void rankGuesses(int list = 5) { // single word rank
 }
 
 
-const int MaxNumPairs = 16384; //  MaxTargetCount * MaxTargetCount / N;  // out of 4M    1567
+const int MaxNumPairs = 8192; //  MaxTargetCount * MaxTargetCount / N;  // out of 4M    1567
 short topPair[MaxNumPairs][2];  // guess indices
 float pairInfo[MaxNumPairs];
 float minPairInfo = 6; // to 7.45 max
@@ -555,14 +544,14 @@ void bestInfoGuesses(int numGuesses = 2) {
   int best[MaxNumGuesses];
   Bits coveredLetters[MaxNumGuesses];
 
-  const double InfoThresh[MaxNumGuesses] = { 0, 4, 7.3, 8, };  // start progress display
+  const double InfoThresh[MaxNumGuesses] = { 0, 4, 9, 8, 10.7 };  // start progress display
   double bestInfo = InfoThresh[numGuesses];
   const char* guesses[MaxNumGuesses] = { 0 };
 
-  for (int g0 = 0; g0 < guessCount; ++g0) {  // or less - best are at top
+  for (int g0 = 0; g0 < guessCount/4; ++g0) {  // or less - best are at top
     guess[0] = rank[g0];
     coveredLetters[0] = letters[guess[0]];
-    if (__popcnt64(coveredLetters[0]) < 10) continue;   // speedup vs. lower threshold for more exhaustive search
+    if (__popcnt64(coveredLetters[0]) < 16) continue;   // speedup vs. lower threshold for more exhaustive search
     if (numGuesses > 1) printf("%d \r", g0);
     guesses[0] = (const char*)word[guess[0]];
 
@@ -572,7 +561,7 @@ void bestInfoGuesses(int numGuesses = 2) {
         if (g1 >= g0) break;
         guess[1] = rank[g1++];
         coveredLetters[1] = coveredLetters[0] | letters[guess[1]];
-        if (__popcnt64(coveredLetters[1]) < 26) continue;
+        if (__popcnt64(coveredLetters[1]) < 32) continue;
         guesses[1] = (const char*)word[guess[1]];
       }
 
@@ -582,7 +571,7 @@ void bestInfoGuesses(int numGuesses = 2) {
           if (g2 >= g1) break;
           guess[2] = rank[g2++];
           coveredLetters[2] = coveredLetters[1] | letters[guess[2]];
-          if (__popcnt64(coveredLetters[2]) < 40) continue;
+          if (__popcnt64(coveredLetters[2]) < 48) continue;
           guesses[2] = (const char*)word[guess[2]];
         }
 
@@ -595,7 +584,10 @@ void bestInfoGuesses(int numGuesses = 2) {
               best[n] = guess[n];
             }
           }
-          printf("%.3f %2d %2d %d %d\n", info, (int)__popcnt64(coveredLetters[0]), (int)__popcnt64(coveredLetters[numGuesses - 1]), g0, g1);  // 11.2 bits info req'd
+          printf("%.3f %2d %2d %2d %d %d\n", info,
+            (int)__popcnt64(coveredLetters[0]),
+            (int)__popcnt64(letters[guess[1]]),
+            (int)__popcnt64(coveredLetters[numGuesses - 1]), g0, g1);  // 11.2 bits info req'd
         }
         if (numGuesses == 2) {
           if (info >= minPairInfo)
@@ -632,7 +624,7 @@ void best3words() {
   const int numGuesses = 3;
   int guess[MaxNumGuesses]; // index
   const char* guesses[MaxNumGuesses] = { 0 };
-  double bestInfo = 8;
+  double bestInfo = 10.7;
   Bits coveredLetters[MaxNumGuesses];
 
   for (int p = 0; p < MaxNumPairs; ++p) {
@@ -645,14 +637,14 @@ void best3words() {
     coveredLetters[1] = letters[guess[0]] | letters[guess[1]];
     printf("%d\r", p);
 
-    for (int g2 = 0; g2 < guessCount; ++g2) { // middle ranks most likely
+    for (int g2 = 0; g2 < guessCount; ++g2) { // better bcawards??  TODO
       guess[2] = rank[g2];
       guesses[2] = (const char*)word[guess[2]];
       coveredLetters[2] = coveredLetters[1] | letters[guess[2]];
-      if (__popcnt64(coveredLetters[2]) < 40) continue;
+      if (__popcnt64(coveredLetters[2]) < 48) continue;
 
       double info = calcInfo(guesses);
-      if (info >= bestInfo - 0.05) {
+      if (info >= bestInfo - 0.01) {
         if (info >= bestInfo)
           bestInfo = info;
         for (int n = 0; n < numGuesses; ++n)
@@ -707,5 +699,33 @@ NYT Mar 2022: 2,309 hidden words, 10,663 allowed guesses
 removed: agora, fibre, lynch, pupal, slave, wench 
 
 removed guesses?" darky, gooks, spics, coons, sluts, whore, bitch, pussy, ... ?re-added?
+
+daint corse glyph 10.800 51 107 10255
+daint corse plumb 10.797 50 107 10581
+doilt parse bunch 10.794 50 404 9490
+plant dorse chimb 10.822 50 670 10324
+plant sored chimb 10.819 50 1104 10324
+pored slant chimb 10.819 50 1105 10324
+roped slant chimb 10.818 50 2165 10324
+gored slant chimp 10.825 51 3458 9533
+borde slant chimp 10.818 50 4219 9533
+bored slant chimp 10.824 50 4322 9533
+glint sared chomp 10.818 51 4570 9447
+brant soled chimp 10.819 50 4703 9533
+robed slant chimp 10.829 50 6193 9533
+horst dance blimp 10.827 50 6545 9201
+horde canst blimp 10.820 50 7957 9201
+chant sored blimp 10.824 50 8153 9201
+chant dorse blimp 10.824 50 8430 9201
+blist dance morph 10.830 50 18775 6782
+glint sored champ 10.825 51 18947 8205
+clipt morse bandh 10.823 50 21112 7073
+sabed clint morph 10.822 50 23974 6782
+clasp morne dight 10.826 51 30907 8177
+robed plast ginch 10.823 50 31307 8126
+robed spalt ginch 10.828 50 35056 8126
+clasp borne dight 10.823 50 37906 8177
+spred giant clomb 10.820 50 41770 8155
+shard clint pombe 10.822 50 64338 6519
 
 */
