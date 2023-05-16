@@ -6,6 +6,8 @@
 #include <math.h>
 #include <intrin.h>
 
+//TODO: use RMS of words left, included vs. remaining
+
 const int MaxNumGuesses = 6;
 
 const int MaxTargetCount = 2309 - 5;  // removed 5 recent solutions to make count % 64 == 0
